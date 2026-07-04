@@ -4476,11 +4476,13 @@ class MainWindow(QMainWindow):
         header_layout.addStretch(1)
         
         username = get_user_display_name()
+        if username == "MKATW":
+            username = "Sumit"
         
         welcome_container = QVBoxLayout()
         welcome_container.setSpacing(self.dm.scale(6))
         
-        welcome_label = QLabel(f"Welcome, <span style='color: #00ff00; font-weight:700;'>{username}</span>")
+        welcome_label = QLabel(f"Hello <span style='color: #00bfff; font-weight:700;'>{username}</span>, hope you're good! Let's see your battery health.")
         welcome_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         welcome_label.setStyleSheet(f"font-size: {self.dm.scale_font_size(17)}px; color: #cccccc;")
         
