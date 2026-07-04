@@ -492,6 +492,7 @@ POWERCFG_TIMEOUT = 30                   # The timeout in seconds for the powercf
 # This global variable allows the user to manually override the detected cycle count for testing or calibration.
 # It is modified via the UI and checked during the data analysis phase.
 CUSTOM_CYCLE_COUNT = None
+CUSTOM_DESIGN_CAPACITY = None
 
 # A list of welcome quotes. A random one is chosen on each application startup.
 WELCOME_QUOTES = [
@@ -1258,6 +1259,10 @@ class BatteryIntelligence:
         # If a custom cycle count is set by the user, override the fetched value.
         if CUSTOM_CYCLE_COUNT is not None:
             data.cycle_count = CUSTOM_CYCLE_COUNT
+            
+        # If a custom design capacity is set by the user, override the fetched value.
+        if CUSTOM_DESIGN_CAPACITY is not None:
+            data.design_capacity_mwh = CUSTOM_DESIGN_CAPACITY
             
         # Save the consolidated static data to cache for the next run.
         self.cache.update({
@@ -4334,6 +4339,11 @@ class MainWindow(QMainWindow):
         custom_cycle_action.triggered.connect(self.show_custom_cycle_dialog)
         file_menu.addAction(custom_cycle_action)
         
+        # Custom Design Capacity Action
+        custom_dc_action = QAction("⚙️ Custom Design Capacity", self)
+        custom_dc_action.triggered.connect(self.show_custom_design_capacity_dialog)
+        file_menu.addAction(custom_dc_action)
+        
         file_menu.addSeparator()
         
         # Exit Action
@@ -4349,6 +4359,12 @@ class MainWindow(QMainWindow):
         calibrate_action = QAction("🔋 Calibrate Battery", self)
         calibrate_action.triggered.connect(self.show_calibration_wizard)
         tools_menu.addAction(calibrate_action)
+        
+        tools_menu.addSeparator()
+        
+        # Expose custom overrides in Tools menu too
+        tools_menu.addAction(custom_cycle_action)
+        tools_menu.addAction(custom_dc_action)
         
         # --- Direct Actions ---
         # Buy Me a Coffee Action
@@ -5386,6 +5402,38 @@ class MainWindow(QMainWindow):
             # Immediately refresh all application data to reflect the change.
             self.refresh_application("Custom cycle count applied.", hard_reset=False)
 
+    def show_custom_design_capacity_dialog(self):
+        """
+        Allows the user to manually input a design capacity in mWh for calibration.
+        This will re-run the analysis with the new value.
+        """
+        if not self.battery_data.battery_present:
+            QMessageBox.information(self, "Not Applicable", "Custom design capacity can only be set for systems with a battery.")
+            return
+        
+        current_dc = self.battery_data.design_capacity_mwh or 0
+        
+        # Use a QInputDialog to get an integer from the user.
+        dc, ok = QInputDialog.getInt(
+            self, "Custom Design Capacity",
+            f"Enter the manufacturer's original Design Capacity in mWh (0 to reset):\n\nCurrent (reported): {current_dc} mWh",
+            value=current_dc, min=0, max=500000
+        )
+        
+        # If the user clicked OK and provided a value...
+        if ok:
+            global CUSTOM_DESIGN_CAPACITY
+            # A value of 0 is used to reset to the auto-detected value.
+            if dc == 0:
+                CUSTOM_DESIGN_CAPACITY = None
+                logging.info("Custom design capacity reset. Reverting to auto-detected value.")
+            else:
+                CUSTOM_DESIGN_CAPACITY = dc
+                logging.info("Custom design capacity set to %d mWh.", dc)
+            
+            # Immediately refresh all application data to reflect the change.
+            self.refresh_application("Custom design capacity applied.", hard_reset=False)
+
 # ============================================================================
     def refresh_application(self, completion_message: str = "All data has been refreshed and custom settings reset.", hard_reset: bool = False):
         """
@@ -5397,9 +5445,10 @@ class MainWindow(QMainWindow):
 
         # --- FIX: Only reset custom cycle count on a hard reset ---
         if hard_reset:
-            global CUSTOM_CYCLE_COUNT
+            global CUSTOM_CYCLE_COUNT, CUSTOM_DESIGN_CAPACITY
             CUSTOM_CYCLE_COUNT = None
-            logging.info("Hard reset: Custom cycle count has been cleared.")
+            CUSTOM_DESIGN_CAPACITY = None
+            logging.info("Hard reset: Custom settings have been cleared.")
 
         status_msg = QLabel("Refreshing all battery data...\nPlease wait...")
         status_msg.setAlignment(Qt.AlignmentFlag.AlignCenter)
