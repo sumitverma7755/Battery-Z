@@ -1,0 +1,9 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.log
+battery_cache.json
+battery_report.xml
+.agents/
+.gemini/
