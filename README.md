@@ -1,6 +1,6 @@
 # Battery-Z ![image](https://github.com/sumitverma7755/Battery-Z/blob/main/logo.ico)
 
-![image](https://github.com/user-attachments/assets/1078d85f-667a-492f-bb17-3b595c37a30d)
+![image](screenshot.png)
  <!-- Placeholder for your screenshot -->
 
 **Battery-Z: Your Laptop’s Battery Companion, Built with Precision and Care**  

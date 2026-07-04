@@ -4476,7 +4476,7 @@ class MainWindow(QMainWindow):
         header_layout.addStretch(1)
         
         username = get_user_display_name()
-        if username == "MKATW":
+        if username in ["MKATW", "Saumya"]:
             username = "Sumit"
         
         welcome_container = QVBoxLayout()
