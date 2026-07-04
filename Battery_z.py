@@ -1056,6 +1056,18 @@ def get_windows_install_date() -> Optional[datetime.datetime]:
     # Return None if all methods failed.
     return None
 
+def is_system_older_than_30_days() -> bool:
+    """
+    Checks if the system installation is older than 30 days.
+    """
+    try:
+        install_date = get_windows_install_date()
+        if install_date:
+            return (datetime.datetime.now() - install_date).days > 30
+    except Exception:
+        pass
+    return False
+
 # ============================================================================
 # PART 2
 # ============================================================================
@@ -1605,7 +1617,6 @@ class BatteryIntelligence:
                 pythoncom.CoUninitialize()
 
         # --- Final Sanity Checks and Fallbacks ---
-        # If after all methods, some data is still missing, use defaults or derive them.
         if 'design_capacity' not in info or info['design_capacity'] <= 0:
             info['design_capacity'] = 50000 # Default to 50Wh
             logging.warning("Design capacity not found. Using default value: %d mWh", info['design_capacity'])
@@ -1622,9 +1633,6 @@ class BatteryIntelligence:
         Retrieves the battery cycle count using an extensive chain of fallback
         methods to ensure the highest possible accuracy. It tries direct hardware
         queries first, then report parsing, and finally estimation.
-
-        Returns:
-            Optional[int]: The detected cycle count, or None if all methods fail.
         """
         logging.info("Attempting to fetch battery cycle count...")
         
@@ -1636,10 +1644,13 @@ class BatteryIntelligence:
                 c = wmi.WMI(namespace="root\\wmi")
                 cycle_data = c.BatteryCycleCount()
                 if cycle_data and hasattr(cycle_data[0], 'CycleCount'):
-                    count = cycle_data[0].CycleCount
-                    logging.info("SUCCESS: Cycle count from WMI (root\\wmi) is %d.", count)
-                    pythoncom.CoUninitialize()
-                    return int(count)
+                    count = int(cycle_data[0].CycleCount)
+                    if count > 0 or not is_system_older_than_30_days():
+                        logging.info("SUCCESS: Cycle count from WMI (root\\wmi) is %d.", count)
+                        pythoncom.CoUninitialize()
+                        return count
+                    else:
+                        logging.info("WMI returned 0 cycles, but system is older than 30 days. Continuing...")
             except Exception as e:
                 logging.warning("WMI (root\\wmi) for cycle count failed: %s. Trying next method.", e)
             finally:
@@ -1654,11 +1665,14 @@ class BatteryIntelligence:
                 match = re.search(r'<CycleCount>(\d+)</CycleCount>', content)
                 if match:
                     count = int(match.group(1))
-                    logging.info("SUCCESS: Cycle count from powercfg XML is %d.", count)
-                    return count
+                    if count > 0 or not is_system_older_than_30_days():
+                        logging.info("SUCCESS: Cycle count from powercfg XML is %d.", count)
+                        return count
+                    else:
+                        logging.info("Powercfg XML returned 0 cycles, but system is older than 30 days. Continuing...")
         except Exception as e:
             logging.warning("Parsing powercfg XML for cycle count failed: %s. Trying next method.", e)
-
+ 
         # --- Method 3: PowerShell (as a subprocess) ---
         # This can sometimes succeed where the Python WMI library fails.
         try:
@@ -1671,27 +1685,43 @@ class BatteryIntelligence:
             output = result.stdout.strip()
             if output.isdigit():
                 count = int(output)
-                logging.info("SUCCESS: Cycle count from PowerShell is %d.", count)
-                return count
+                if count > 0 or not is_system_older_than_30_days():
+                    logging.info("SUCCESS: Cycle count from PowerShell is %d.", count)
+                    return count
+                else:
+                    logging.info("PowerShell WMI returned 0 cycles, but system is older than 30 days. Continuing...")
         except Exception as e:
             logging.warning("PowerShell for cycle count failed: %s. Trying next method.", e)
-
-        # --- Method 4: Estimation from Capacity Degradation (Last Resort) ---
-        # This is an estimation, not a direct reading, and is only used if all other methods fail.
-        logging.warning("All direct methods for cycle count failed. Falling back to estimation.")
+ 
+        # --- Method 4: Estimation from Capacity Degradation or System Age ---
+        logging.warning("All direct methods for cycle count failed or returned 0 on older system. Falling back to estimation.")
+        
+        # 4a. Capacity Degradation model
         try:
             design = self.cache.get('design_capacity')
             fcc = self.cache.get('full_charge_capacity')
             total_cycles = self.cache.get('total_cycles', 1000)
             
             if design and fcc and design > 0 and fcc > 0:
-                # The logic from reference.py: assume 20% total wear over the battery's lifespan.
-                # We can reverse this to estimate how many cycles correspond to the current wear level.
                 wear_level = 1.0 - (fcc / design)
-                if wear_level > 0:
-                    # (wear_level / 0.20) gives the fraction of lifespan used. Multiply by total cycles.
+                if wear_level > 0.01:  # Only use capacity estimation if there is measurable wear
                     estimated_count = int((wear_level / 0.20) * total_cycles)
-                    logging.info("SUCCESS: Estimated cycle count from capacity degradation is %d.", estimated_count)
+                    if estimated_count > 0:
+                        logging.info("SUCCESS: Estimated cycle count from capacity degradation is %d.", estimated_count)
+                        return estimated_count
+        except Exception as e:
+            logging.error("Capacity degradation cycle count estimation failed: %s", e)
+            
+        # 4b. System Age model (if capacity degradation reports no wear due to HP BIOS anomalies)
+        try:
+            install_date = get_windows_install_date()
+            if install_date:
+                age_days = (datetime.datetime.now() - install_date).days
+                if age_days > 0:
+                    # Estimate based on a standard average usage rate of 0.4 cycles per day
+                    estimated_count = int(age_days * 0.4)
+                    estimated_count = max(1, min(estimated_count, 1500))  # Reasonable upper cap
+                    logging.info("SUCCESS: Estimated cycle count based on system age (%d days) is %d.", age_days, estimated_count)
                     return estimated_count
         except Exception as e:
             logging.error("Cycle count estimation failed: %s", e)
